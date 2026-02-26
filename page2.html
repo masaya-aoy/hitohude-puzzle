@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <style>
+    /* --- 全体デザイン --- */
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f0f4f8;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden; /* スクロール禁止 */
+      touch-action: none; /* スマホでのブラウザバック等を無効化 */
+      user-select: none; /* 文字選択禁止 */
+      -webkit-user-select: none;
+    }
+
+    h1, h2 { margin: 0; padding: 10px; }
+
+    /* --- 画面切り替え管理 --- */
+    .screen {
+      display: none;
+      width: 100%;
+      height: 100%;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: absolute;
+      top: 0; left: 0;
+    }
+    .screen.active { display: flex; }
+
+    /* --- ステージ選択画面 --- */
+    #stage-list {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr); /* 3列に変更して多く表示 */
+      gap: 10px;
+      padding: 20px;
+      width: 95%;
+      max-width: 500px;
+      overflow-y: auto;
+      padding-bottom: 50px;
+    }
+    .stage-btn {
+      background: white;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      padding: 15px 5px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #555;
+      cursor: pointer;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      transition: transform 0.1s, background 0.2s;
+      position: relative;
+    }
+    .stage-btn:active { transform: scale(0.95); }
+    .stage-btn.locked {
+      background: #e0e0e0;
+      color: #999;
+      pointer-events: none;
+    }
+    .stage-btn.cleared {
+      border-color: #27ae60;
+      color: #27ae60;
+    }
+    .stage-btn.cleared::after {
+      content: '★';
+      position: absolute;
+      top: 2px; right: 2px;
+      font-size: 10px;
+    }
+
+    /* --- プレイ画面 --- */
+    #game-header {
+      width: 100%;
+      padding: 10px 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: white;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+      z-index: 10;
+      box-sizing: border-box;
+    }
+    .back-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #555;
+      padding: 0 10px;
+    }
+    #level-title { font-size: 20px; font-weight: bold; }
+
+    #board-container {
+      position: relative;
+      margin: 20px auto;
+    }
+
+    #board {
+      display: grid;
+      gap: 6px;
+      background-color: #bbada0;
+      padding: 8px;
+      border-radius: 8px;
+    }
+
+    .cell {
+      background-color: #cdc1b4;
+      border-radius: 6px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-weight: bold;
+      color: #776e65;
+      position: relative;
+      transition: background-color 0.2s;
+      overflow: hidden; /* はみ出し防止 */
+    }
+
+    /* 制約マスのスタイル（初期状態） */
+    .cell.constraint {
+      border: 3px solid #333;
+      color: #333;
+      font-size: 40px;
+      box-sizing: border-box;
+      /* フォントサイズはJSで制御しますが、基本設定 */
+      line-height: 1;
+    }
+
+    /* 障害物マスのスタイル */
+    .cell.obstacle {
+      background-color: #7f8c8d;
+      color: #95a5a6;
+    }
+    .cell.obstacle::after {
+      content: '×';
+      font-size: 30px;
+      opacity: 0.5;
+    }
+
+    /* 通過したマス */
+    .cell.visited {
+      background-color: #3498db;
+      color: white;
+      font-size: 40px;
+      border: none;
+    }
+
+    /* 間違えたマス */
+    .cell.error {
+      background-color: #e74c3c !important;
+      color: white;
+      animation: shake 0.4s;
+      z-index: 20; /* 前面に */
+    }
+
+    /* 線を描画するSVGレイヤー */
+    #lines-svg {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .path-line {
+      stroke: rgba(255, 255, 255, 0.6);
+      stroke-width: 8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+
+    #controls {
+      margin-top: auto;
+      margin-bottom: 30px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      flex-direction: column;
+      align-items: center;
+    }
+    .reset-btn {
+      background: #e74c3c;
+      color: white;
+      border: none;
+      padding: 12px 40px;
+      font-size: 18px;
+      border-radius: 25px;
+      box-shadow: 0 4px 0 #c0392b;
+      cursor: pointer;
+    }
+    .reset-btn:active { transform: translateY(4px); box-shadow: none; }
+
+    #status-msg {
+      height: 20px;
+      color: #e74c3c;
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+
+    /* --- クリアオーバーレイ --- */
+    #clear-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      animation: fadeIn 0.3s;
+    }
+    #clear-overlay.active { display: flex; }
+    
+    .clear-msg {
+      font-size: 40px;
+      color: #f1c40f;
+      font-weight: bold;
+      text-shadow: 0 0 10px rgba(241, 196, 15, 0.5);
+      margin-bottom: 30px;
+    }
+    .next-btn {
+      background: #27ae60;
+      color: white;
+      border: none;
+      padding: 15px 50px;
+      font-size: 20px;
+      border-radius: 30px;
+      margin-bottom: 15px;
+      cursor: pointer;
+      box-shadow: 0 4px 0 #219150;
+    }
+    .home-btn {
+      background: transparent;
+      border: 2px solid white;
+      color: white;
+      padding: 10px 30px;
+      border-radius: 25px;
+      cursor: pointer;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  </style>
+</head>
+<body>
+
+  <!-- ステージ選択画面 -->
+  <div id="select-screen" class="screen active">
+    <h1 style="color:#2c3e50; margin-top:40px;">一筆書きパズル</h1>
+    <p style="color:#7f8c8d; margin-bottom:10px; font-size:12px;">全15コース</p>
+    <div id="stage-list">
+      <!-- JSで生成 -->
+    </div>
+  </div>
+
+  <!-- ゲームプレイ画面 -->
+  <div id="game-screen" class="screen">
+    <div id="game-header">
+      <button class="back-btn" onclick="goHome()">◀</button>
+      <div id="level-title">コース 1</div>
+      <div style="width:24px;"></div>
+    </div>
+
+    <div id="board-container">
+      <div id="board">
+        <!-- JSでセル生成 -->
+      </div>
+      <svg id="lines-svg">
+        <path id="current-path" class="path-line" d="" />
+      </svg>
+    </div>
+
+    <div id="controls">
+      <div id="status-msg"></div>
+      <button class="reset-btn" onclick="resetLevel()">リセット</button>
+    </div>
+
+    <!-- クリア画面 -->
+    <div id="clear-overlay">
+      <div class="clear-msg">CLEAR!</div>
+      <button class="next-btn" id="next-btn" onclick="goNextLevel()">次のコースへ</button>
+      <button class="home-btn" onclick="goHome()">ステージ選択へ</button>
+    </div>
+  </div>
+
+  <script>
+    // --- ゲームデータ ---
+    // 0: 通常, -1: 障害物
+    // 数値: 順番指定
+    // 文字列: 特殊制約 ("7x": 7以外, "7↓": 7以下, "7↑": 7以上)
+    const stages = [
+      // --- 初級 (1-5) ---
+      {
+        rows: 4, cols: 4, 
+        grid: [
+            [-1, 0, 0, -1], 
+            [0, "3↓", 0, -1], 
+            [8, 0, 0, 0],
+            [0, 0, 0, 0]
+        ] },
+      { 
+        rows: 4, cols: 4, 
+        grid: [
+            [-1, 0, 0, 0], 
+            [-1, "11↑", -1, 0], 
+            [0, 0, 0, 0],
+            [0, 1, 0, 0]
+        ] },
+      { 
+        rows: 4, cols: 4, 
+        grid: [
+            [0, 0, 0, 0], 
+            [0, -1, 0, 0], 
+            [0, 0, "9↑", -1], 
+            [0, 0, 1, -1]
+        ] },
+      { 
+        rows: 4, cols: 4, 
+        grid: [
+            [-1, 0, 0, 0], 
+            [0, 0, -1, 0], 
+            [0, 0, -1, 0], 
+            ["3↓", 0, 7, 0]
+        ] },
+      { 
+        rows: 5, cols: 4, 
+        grid: [
+            [0, 5, -1, 0], 
+            [0, 0, 0, 0], 
+            [0, 0, 0, 0], 
+            ["17↑", "17↑", -1, 0], 
+            [0, 0, 0, 0]
+        ] },
+      
+      // --- 中級 障害物 (6-10) ---
+      { 
+        rows: 4, cols: 4, 
+        grid: [
+            [0, "8x", 0, 0], 
+            ["8↑", 0, 0, 0], 
+            [-1, "8↓", 0, -1], 
+            [0, 0, 0, -1]
+        ] },
+      { 
+        rows: 5, cols: 4, 
+        grid: [
+            [0, 0, 0, 0], 
+            [0, 0, 0, 0], 
+            ["12↑", -1, "9↑", 1], 
+            [0, 0, 0, 0], 
+            [-1, 0, 0, 0]
+        ] },
+      { 
+        rows: 5, cols: 4, 
+        grid: [
+            [0, 0, -1, 0], 
+            [0, 0, 0, 0], 
+            [0, "9↑",0 , -1], 
+            ["9↑", "9↓", 0, -1], 
+            [0, 0, 0, -1]
+        ] },
+      { 
+        rows: 5, cols: 4, 
+        grid: [
+            ["12↑", 0, -1, -1], 
+            ["12↑", 0, 0, 0], 
+            [0, 0, "12↑", 0], 
+            [0, -1, -1, 0], 
+            [0, 0, 0, -0]
+        ] },
+      { 
+        rows: 5, cols: 4, 
+        grid: [
+            [0, 0, 0, 0], 
+            [0, -1, 0, 0], 
+            [0, 0, "12↑", 0], 
+            [-1,0 , "4↓", 0], 
+            [0, "9↑", 0, 0]
+        ] },
+
+      // --- 上級 あいまい制約 (11-15) ---
+      // 11. Not制約 (x)
+      { 
+        rows: 5, cols: 5, 
+        grid: [
+          [-1, 0, 0, 0, -1], 
+          [-1, 0, 0, 0, 1], 
+          [-1, 0, "4x", 0, 0], 
+          [-1, 12, 0, 0, 0], 
+          [0, 0, 0, 0, 0]
+        ] 
+      },
+      // 12. 上限制約 (↓ Max) - 早く通れ
+      { 
+        rows: 4, cols: 3, 
+        grid: [
+          ["5x", "4↑", "3x"], 
+          ["8x", -1,"9x"], 
+          ["6x", -1, "7x"], 
+          ["1x", "3x", "5x"]
+        ] 
+      },
+      // 13. 下限制約 (↑ Min) - 後で通れ
+      { 
+        rows: 5, cols: 5, 
+        grid: [
+          [ -1,  0,  0,  0, 0],
+          [-1,  0,  0,  0,  0],
+          [ 0,  0,  0, -1,  0],
+          [ 0, 16, "15x", 0,  0],
+          [ 0,  0, -1,  0, -1]
+        ] 
+      },
+      // 14. 複合基本
+      { 
+        rows: 5, cols: 5, 
+        grid: [
+          [0, 0, 0, 0, 0], 
+          ["7↑", 0, 0, "7↑", 0], 
+          [0, 0, -1, 0, 0], 
+          [0, 0, -1, 0, 0], 
+          [-1, -1, 0, 0, "7↑"]
+        ] 
+      },
+      // 15. 超複合
+      { 
+        rows: 5, cols: 5, 
+        grid: [
+          [-1, 0, "10↑", 0, "10↓"],  
+          [0, 0, -1, 0, 0],  
+          [0, 0, "10↑", "10↓", 0],  
+          [-1, 0, 0, 0, 0], 
+          [-1, "10↓", 0, 0, 0] 
+        ] 
+      }
+    ];
+
+    // --- 状態管理 ---
+    let currentLevelIndex = 0;
+    let unlockedLevels = 1;
+    let path = [];
+    let isDrawing = false;
+    let isGameOver = false;
+    let cellSize = 0;
+
+    const stageListEl = document.getElementById('stage-list');
+    const boardEl = document.getElementById('board');
+    const pathSvgEl = document.getElementById('current-path');
+    const statusMsgEl = document.getElementById('status-msg');
+    const boardContainer = document.getElementById('board-container');
+
+    window.onload = () => {
+      loadProgress();
+      renderStageSelect();
+    };
+
+    function loadProgress() {
+      const saved = localStorage.getItem('puzzle_unlocked_levels_v2'); // キー変更(バージョンアップ)
+      if (saved) unlockedLevels = parseInt(saved, 10);
+    }
+
+    function saveProgress() {
+      localStorage.setItem('puzzle_unlocked_levels_v2', unlockedLevels);
+    }
+
+    function renderStageSelect() {
+      stageListEl.innerHTML = '';
+      for (let i = 0; i < stages.length; i++) {
+        const btn = document.createElement('div');
+        btn.className = 'stage-btn';
+        btn.textContent = `コース${i + 1}`; // シンプルに数字のみ
+        
+        if (i + 1 > unlockedLevels) {
+          btn.classList.add('locked');
+          btn.textContent = '🔒';
+        } else {
+          if (i + 1 < unlockedLevels) btn.classList.add('cleared');
+          btn.onclick = () => startLevel(i);
+        }
+        stageListEl.appendChild(btn);
+      }
+    }
+
+    function goHome() {
+      document.getElementById('game-screen').classList.remove('active');
+      document.getElementById('select-screen').classList.add('active');
+      document.getElementById('clear-overlay').classList.remove('active');
+      renderStageSelect();
+    }
+
+    function startLevel(index) {
+      currentLevelIndex = index;
+      document.getElementById('select-screen').classList.remove('active');
+      document.getElementById('game-screen').classList.add('active');
+      document.getElementById('level-title').textContent = `コース ${index + 1}`;
+      document.getElementById('clear-overlay').classList.remove('active');
+      resetLevel();
+    }
+
+    function resetLevel() {
+      path = [];
+      isDrawing = false;
+      isGameOver = false;
+      statusMsgEl.textContent = '';
+      renderBoard();
+      updatePathView();
+    }
+
+    // 制約パース関数
+    function parseConstraint(val) {
+      if (typeof val === 'number') {
+        if (val === -1) return { type: 'obstacle' };
+        if (val > 0) return { type: 'exact', num: val };
+        return null;
+      }
+      if (typeof val === 'string') {
+        if (val.endsWith('x')) return { type: 'not', num: parseInt(val), text: val };
+        if (val.endsWith('↓')) return { type: 'max', num: parseInt(val), text: val };
+        if (val.endsWith('↑')) return { type: 'min', num: parseInt(val), text: val };
+      }
+      return null;
+    }
+
+    function renderBoard() {
+      const stage = stages[currentLevelIndex];
+      boardEl.innerHTML = '';
+      boardEl.style.gridTemplateColumns = `repeat(${stage.cols}, 1fr)`;
+      
+      const containerWidth = Math.min(window.innerWidth - 30, 400); 
+      cellSize = (containerWidth - (stage.cols - 1) * 5) / stage.cols; // gap:5
+      boardContainer.style.width = `${containerWidth}px`;
+      //boardContainer.style.height = `${containerWidth}px`;
+      const containerHeight = cellSize * stage.rows + (stage.rows - 1) * 6 + 16;
+      boardContainer.style.height = `${containerHeight}px`;
+
+      for (let r = 0; r < stage.rows; r++) {
+        for (let c = 0; c < stage.cols; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.style.width = `${cellSize}px`;
+          cell.style.height = `${cellSize}px`;
+          cell.dataset.r = r;
+          cell.dataset.c = c;
+
+          const val = stage.grid[r][c];
+          const constraint = parseConstraint(val);
+          
+          if (constraint) {
+            if (constraint.type === 'obstacle') {
+              cell.classList.add('obstacle');
+            } else {
+              cell.classList.add('constraint');
+              cell.textContent = constraint.text || constraint.num;
+              
+              // 文字サイズ自動調整
+              const textLen = cell.textContent.length;
+              if (textLen >= 3) {
+                 cell.style.fontSize = `${cellSize * 0.4}px`; // 文字多いなら小さく
+              } else {
+                 cell.style.fontSize = `${cellSize * 0.6}px`;
+              }
+            }
+          }
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    // --- 操作ロジック ---
+    boardContainer.onpointerdown = (e) => {
+      if (isGameOver) return;
+      const cell = getCellFromPoint(e.clientX, e.clientY);
+      if (cell) {
+        if (cell.classList.contains('obstacle')) return;
+        
+        const r = parseInt(cell.dataset.r);
+        const c = parseInt(cell.dataset.c);
+        const existingIndex = path.findIndex(p => p.r === r && p.c === c);
+        
+        if (existingIndex !== -1) {
+          if (existingIndex === path.length - 1) {
+            isDrawing = true;
+          } else {
+            path = path.slice(0, existingIndex + 1);
+            updateBoardState();
+            updatePathView();
+            isDrawing = true;
+          }
+        } else {
+          if (path.length === 0) {
+            tryMove(r, c);
+            isDrawing = true;
+          }
+        }
+        boardContainer.setPointerCapture(e.pointerId);
+      }
+    };
+
+    boardContainer.onpointermove = (e) => {
+      if (!isDrawing || isGameOver) return;
+      const cell = getCellFromPoint(e.clientX, e.clientY);
+      if (cell) {
+        tryMove(parseInt(cell.dataset.r), parseInt(cell.dataset.c));
+      }
+    };
+
+    boardContainer.onpointerup = () => { isDrawing = false; };
+
+    function getCellFromPoint(x, y) {
+      const el = document.elementFromPoint(x, y);
+      return (el && el.classList.contains('cell')) ? el : null;
+    }
+
+    function tryMove(r, c) {
+      const stage = stages[currentLevelIndex];
+      // 障害物
+      if (parseConstraint(stage.grid[r][c])?.type === 'obstacle') return;
+
+      if (path.length > 0) {
+        const last = path[path.length - 1];
+        if (last.r === r && last.c === c) return;
+        
+        const existingIndex = path.findIndex(p => p.r === r && p.c === c);
+        if (existingIndex !== -1) {
+           path = path.slice(0, existingIndex + 1);
+           updateBoardState();
+           updatePathView();
+           return;
+        }
+        if (Math.abs(last.r - r) + Math.abs(last.c - c) !== 1) return;
+      }
+
+      const currentStep = path.length + 1;
+      const constraint = parseConstraint(stage.grid[r][c]);
+      let isMistake = false;
+
+      // --- 制約判定ロジック ---
+      if (constraint && constraint.type !== 'obstacle') {
+        if (constraint.type === 'exact') {
+           if (constraint.num !== currentStep) isMistake = true;
+        } else if (constraint.type === 'not') {
+           if (constraint.num === currentStep) isMistake = true;
+        } else if (constraint.type === 'max') {
+           if (currentStep > constraint.num) isMistake = true;
+        } else if (constraint.type === 'min') {
+           if (currentStep < constraint.num) isMistake = true;
+        }
+      }
+
+      path.push({r, c});
+      updateBoardState(isMistake);
+      updatePathView();
+
+      if (isMistake) {
+        isGameOver = true;
+        isDrawing = false;
+        statusMsgEl.textContent = `条件違反です！`;
+      } else {
+        checkClear();
+      }
+    }
+
+    function updateBoardState(lastIsError = false) {
+      const stage = stages[currentLevelIndex];
+      const cells = document.querySelectorAll('.cell');
+      
+      // リセット
+      cells.forEach(cell => {
+        const r = parseInt(cell.dataset.r);
+        const c = parseInt(cell.dataset.c);
+        const val = stage.grid[r][c];
+        const constraint = parseConstraint(val);
+        
+        cell.className = 'cell'; 
+        cell.textContent = '';
+        cell.style.fontSize = ''; // フォントサイズリセット
+
+        if (constraint) {
+          if (constraint.type === 'obstacle') {
+            cell.classList.add('obstacle');
+          } else {
+            cell.classList.add('constraint');
+            cell.textContent = constraint.text || constraint.num;
+            // フォントサイズ再計算
+            const textLen = cell.textContent.length;
+            if (textLen >= 3) {
+               cell.style.fontSize = `${cellSize * 0.4}px`;
+            } else {
+               cell.style.fontSize = `${cellSize * 0.6}px`;
+            }
+          }
+        }
+      });
+
+      // パス反映
+      path.forEach((p, index) => {
+        const cell = document.querySelector(`.cell[data-r="${p.r}"][data-c="${p.c}"]`);
+        if (!cell) return;
+        const stepNum = index + 1;
+
+        if (index === path.length - 1 && lastIsError) {
+          cell.classList.add('error');
+          cell.textContent = stepNum;
+          cell.style.fontSize = `${cellSize * 0.5}px`;
+        } else {
+          cell.classList.add('visited');
+          cell.classList.remove('constraint');
+          cell.textContent = stepNum;
+          cell.style.fontSize = `${cellSize * 0.5}px`;
+        }
+      });
+    }
+
+    function updatePathView() {
+      if (path.length < 2) {
+        pathSvgEl.setAttribute('d', '');
+        return;
+      }
+      const gap = 5;
+      const getCenter = (r, c) => {
+        const x = c * (cellSize + gap) + cellSize / 2 + 6; // padding分
+        const y = r * (cellSize + gap) + cellSize / 2 + 6;
+        return {x, y};
+      };
+      let d = '';
+      path.forEach((p, i) => {
+        const pos = getCenter(p.r, p.c);
+        d += (i === 0 ? `M ${pos.x} ${pos.y}` : ` L ${pos.x} ${pos.y}`);
+      });
+      pathSvgEl.setAttribute('d', d);
+    }
+
+    function checkClear() {
+      const stage = stages[currentLevelIndex];
+      let obstacleCount = 0;
+      for(let r=0; r<stage.rows; r++) {
+        for(let c=0; c<stage.cols; c++) {
+          if(parseConstraint(stage.grid[r][c])?.type === 'obstacle') obstacleCount++;
+        }
+      }
+      const targetCount = (stage.rows * stage.cols) - obstacleCount;
+      
+      if (path.length === targetCount && !isGameOver) {
+        isDrawing = false;
+        isGameOver = true;
+        setTimeout(() => {
+          document.getElementById('clear-overlay').classList.add('active');
+          if (currentLevelIndex + 1 >= unlockedLevels) {
+            unlockedLevels = currentLevelIndex + 2;
+            saveProgress();
+          }
+          const nextBtn = document.getElementById('next-btn');
+          if (currentLevelIndex + 1 >= stages.length) {
+            nextBtn.style.display = 'none';
+          } else {
+            nextBtn.style.display = 'block';
+          }
+        }, 300);
+      }
+    }
+
+    function goNextLevel() {
+      if (currentLevelIndex + 1 < stages.length) {
+        startLevel(currentLevelIndex + 1);
+      }
+    }
+  </script>
+</body>
+</html>
