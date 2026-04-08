@@ -52,7 +52,3 @@
 応用編では「7x（7番目以外）」「4↓（4番目以下）」などの特殊な制約が登場します。
 
 全てのマス（×印の障害物を除く）を青く塗りつぶせばクリアです！
-
-📄 ライセンス
-
-This project is open source and available under the MIT License.
